@@ -132,9 +132,12 @@ def run_hdc(regenerate_hypervector: bool = True,
 
     # generate spike class for windows
     spike_class = spike_class[0: len(spike_times)]
+    class_set = set(spike_class)
+    num_of_class = len(class_set)
     training_spike_class = [int(spike_class[window_having_spike.index(i)] if i in window_having_spike else 0) for i in range(num_of_training_windows)]
 
     # training on spike signals
+    logging.info("S1: Calculate hypervectors per window...")
     for i in tqdm.tqdm(range(num_of_training_windows), ascii="░▒█", desc="Training windows"):
         window = training_sequence[i * training_window_length: (i + 1) * training_window_length]
         # process the window
@@ -149,7 +152,26 @@ def run_hdc(regenerate_hypervector: bool = True,
             block_hv.append(compressed_signal_hv)
         training_hv.append(bundle_dense(block_hv))
 
-    breakpoint()
+    logging.info("S2: Compress hypervectors per class...")
+    # convert to np.array for ease of operations
+    training_hv = np.array(training_hv)
+    training_spike_labels = np.array(training_spike_labels)
+    training_spike_class = np.array(training_spike_class)
+    
+    hv_per_class: list = []
+    hv_per_class_dict: dict = {}
+    for i in tqdm.tqdm(range(len(class_set)), ascii="░▒█", desc="Compressing hypervectors"):
+        class_idx = int(list(class_set)[i])
+        all_hv = training_hv[training_spike_class == class_idx]
+        compressed_hv = bundle_dense(all_hv)
+        hv_per_class.append(compressed_hv)
+        hv_per_class_dict[class_idx] = np.array(compressed_hv)
+
+    logging.info("S3: Compress hypervectors for all classes...")
+    hv_per_class = np.array(hv_per_class)
+    hv_all_classes: np.array = bundle_dense(hv_per_class)
+
+    return hv_per_class_dict, hv_all_classes
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -164,9 +186,11 @@ if __name__ == "__main__":
                      "C_Easy2_noise005.mat"]
 
     for testcase in testcase_list:
-        run_hdc(regenerate_hypervector=regenerate_hypervector,
+        hv_per_class_dict, hv_all_classes = run_hdc(
+                regenerate_hypervector=regenerate_hypervector,
                 testcase_folder=testcase_folder,
                 testcase=testcase,
                 training_window_length=training_window_length,
                 fs=fs,
                 training_time=training_time)
+        breakpoint()
