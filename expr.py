@@ -50,12 +50,23 @@ def generate_hypervector(hv_length: int = 1024, hv_count: int = 401) -> dict:
         hv_dict[i] = new_hv
     return hv_dict
 
+def calc_hamming_distance(hv1, hv2) -> int:
+    """! Calculate the Hamming distance between two hypervectors
+    @param hv1: First hypervector
+    @param hv2: Second hypervector
+    @return: Hamming distance
+    """
+    assert np.all((hv1 == 0) | (hv1 == 1)), "hv1 must only contain 0 or 1"
+    assert np.all((hv2 == 0) | (hv2 == 1)), "hv2 must only contain 0 or 1"
+    # return np.sum(np.array(hv1) != np.array(hv2))
+    return int(sum(np.logical_xor(hv1, hv2)))
+
 def run_hdc(regenerate_hypervector: bool = True,
             testcase_folder: str = "../yunzhu/",
             testcase: str = "C_Easy1_noise005.mat",
             hv_length: int = 1024,
             im_hv_count: int = 401,
-            em_hv_count: int = 1,
+            em_hv_count: int = 10,
             training_window_length: int = 256,
             fs: int = 24000,
             training_time: float = 0.5) -> any:
@@ -132,7 +143,8 @@ def run_hdc(regenerate_hypervector: bool = True,
 
     # generate spike class for windows
     spike_class = spike_class[0: len(spike_times)]
-    class_set = set(spike_class)
+    spike_class = np.append(spike_class, 0)  # append 0 for non-spiking window
+    class_set = sorted(set(spike_class))
     num_of_class = len(class_set)
     training_spike_class = [int(spike_class[window_having_spike.index(i)] if i in window_having_spike else 0) for i in range(num_of_training_windows)]
 
@@ -140,13 +152,17 @@ def run_hdc(regenerate_hypervector: bool = True,
     logging.info("S1: Calculate hypervectors per window...")
     for i in tqdm.tqdm(range(num_of_training_windows), ascii="░▒█", desc="Training windows"):
         window = training_sequence[i * training_window_length: (i + 1) * training_window_length]
+        spike_class = training_spike_class[i]
         # process the window
         block_hv: list = []
         for j in range(len(window)):
             signal_hv: list = []
             signal_level = window[j]
             signal_to_im = IM[int((signal_level + 2) * 100)]
-            signal_hv.append(np.logical_xor(signal_to_im, EM[0]))  # use EM[0] as there is only one channel
+            ## TODO: decode spike class or not?
+            signal_hv.append(signal_to_im)
+            # signal_hv.append(np.logical_xor(signal_to_im, EM[spike_class]))  # use EM to represent spike class (include 0)
+            ## TODO: finish
             # compress signal_hv
             compressed_signal_hv = bundle_dense(signal_hv)
             block_hv.append(compressed_signal_hv)
@@ -160,18 +176,67 @@ def run_hdc(regenerate_hypervector: bool = True,
     
     hv_per_class: list = []
     hv_per_class_dict: dict = {}
+    zero_in_class = False
     for i in tqdm.tqdm(range(len(class_set)), ascii="░▒█", desc="Compressing hypervectors"):
         class_idx = int(list(class_set)[i])
         all_hv = training_hv[training_spike_class == class_idx]
         compressed_hv = bundle_dense(all_hv)
         hv_per_class.append(compressed_hv)
         hv_per_class_dict[class_idx] = np.array(compressed_hv)
+        if class_idx == 0:
+            zero_in_class = True
 
     logging.info("S3: Compress hypervectors for all classes...")
-    hv_per_class = np.array(hv_per_class)
-    hv_all_classes: np.array = bundle_dense(hv_per_class)
+    if zero_in_class:
+        hv_per_class_nz = np.array(hv_per_class[1:])  # remove the zero class
+    else:
+        hv_per_class_nz = np.array(hv_per_class)
+    hv_all_classes: np.array = bundle_dense(hv_per_class_nz)
 
-    return hv_per_class_dict, hv_all_classes
+    # decide the suggested similarity threshold
+    # S1: calculate the maximal Hamming distance within each class
+    max_hamming_dist_per_class: dict = {}
+    average_hamming_dist_per_class: dict = {}
+    three_std_hamming_dist_per_class: dict = {}
+
+    for class_idx, hv in hv_per_class_dict.items():
+        max_hamming_dist = 0
+        average_hamming_dist = []
+        all_hv_in_class = training_hv[training_spike_class == class_idx]
+        for i in range(len(all_hv_in_class)):
+            hamming_dist = calc_hamming_distance(all_hv_in_class[i], hv)
+            max_hamming_dist = max(max_hamming_dist, hamming_dist)
+            average_hamming_dist.append(hamming_dist)
+        max_hamming_dist_per_class[class_idx] = max_hamming_dist
+        average_hamming_dist_per_class[class_idx] = int(np.mean(average_hamming_dist))
+        three_std_hamming_dist_per_class[class_idx] = np.std(average_hamming_dist) * 3 if average_hamming_dist else 0
+    max_hamming_dist = max(max_hamming_dist_per_class.values())
+    logging.debug(f"Max Hamming distance per class: {max_hamming_dist_per_class}")
+    logging.debug(f"Average Hamming distance per class: {average_hamming_dist_per_class}")
+    logging.debug(f"3 Std Hamming distance per class: {three_std_hamming_dist_per_class}")
+
+    # TODO: to be continued
+    # S2: calculate the Hamming distance across class
+    min_dist_across_class = float("inf")
+    hamming_dist_across_class: dict = {}
+    for i in range(len(hv_per_class)):
+        hamming_dist_list = []
+        for j in range(len(hv_per_class)):
+            if i == j:
+                continue
+            hamming_dist = calc_hamming_distance(hv_per_class[i], hv_per_class[j])
+            hamming_dist_list.append(hamming_dist)
+            min_dist_across_class = min(min_dist_across_class, hamming_dist)
+        hamming_dist_across_class[i] = hamming_dist_list
+
+    logging.debug(f"Min Hamming distance across classes: {min_dist_across_class}")
+    suggested_threshold = min_dist_across_class
+    print(average_hamming_dist_per_class)
+    print(hamming_dist_across_class)
+    # expect the distance within each class is small but big across classes
+    # not the truth now
+    breakpoint()
+    return hv_per_class_dict, hv_all_classes, suggested_threshold
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -186,7 +251,7 @@ if __name__ == "__main__":
                      "C_Easy2_noise005.mat"]
 
     for testcase in testcase_list:
-        hv_per_class_dict, hv_all_classes = run_hdc(
+        hv_per_class_dict, hv_all_classes, suggested_threshold = run_hdc(
                 regenerate_hypervector=regenerate_hypervector,
                 testcase_folder=testcase_folder,
                 testcase=testcase,
