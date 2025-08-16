@@ -102,7 +102,7 @@ def run_hdc(regenerate_hypervector: bool = True,
     recording_traces = matlab_source_data["data"][0]
     spike_times = matlab_source_data["spike_times"][0][0][0]
     spike_times += 24  # 24 is for label correction
-    spike_labels = matlab_source_data["spike_class"][0][0][0]
+    spike_class = matlab_source_data["spike_class"][0][0][0]
 
     # assertion: curent IM supports range [-2, -2] with a step of 0.01
     recording_min = np.min(recording_traces)
@@ -111,22 +111,31 @@ def run_hdc(regenerate_hypervector: bool = True,
 
     # training
     logging.info("Training...")
-    breakpoint()
+
     training_sequence = recording_traces[0: int(fs * training_time)]
     num_of_training_windows = len(training_sequence) // training_window_length
     training_hv: list = []  # record of hypervectors of different windows
     training_spike_labels: list = []  # record of spike labels for different windows
     training_spike_class: list = []  # record of spike class for different windows
+
     # generate spike labels for windows
     spike_times = spike_times[spike_times <= int(fs * training_time)]
+    window_having_spike = [int(t // training_window_length) for t in spike_times]
+    training_spike_labels = [1 if i in window_having_spike else 0 for i in range(num_of_training_windows)]
+
     # check the minimal diff of spike time
     spike_times_diff = [spike_times[i+1] - spike_times[i] for i in range(len(spike_times) - 1)]
     spike_times_diff_min = np.min(spike_times_diff) if spike_times_diff else 0
     if spike_times_diff_min < training_window_length:
         logging.warning(f"Spike times ({spike_times_diff_min}) are too close to the window length "
                         f"{training_window_length}, may cause issues in training.")
-    # training_spike_labels
-    for i in tqdm.tqdm(range(num_of_training_windows), desc="Training windows"):
+
+    # generate spike class for windows
+    spike_class = spike_class[0: len(spike_times)]
+    training_spike_class = [int(spike_class[window_having_spike.index(i)] if i in window_having_spike else 0) for i in range(num_of_training_windows)]
+
+    # training on spike signals
+    for i in tqdm.tqdm(range(num_of_training_windows), ascii="░▒█", desc="Training windows"):
         window = training_sequence[i * training_window_length: (i + 1) * training_window_length]
         # process the window
         block_hv: list = []
@@ -139,8 +148,7 @@ def run_hdc(regenerate_hypervector: bool = True,
             compressed_signal_hv = bundle_dense(signal_hv)
             block_hv.append(compressed_signal_hv)
         training_hv.append(bundle_dense(block_hv))
-    
-    pass
+
     breakpoint()
 
 if __name__ == "__main__":
