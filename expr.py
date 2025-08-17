@@ -4,18 +4,18 @@ import scipy.io as sio
 import matplotlib.pyplot as plt
 import tqdm
 
-def u_gen_rand_hv(D,p=0.5) -> list[int]:
+def u_gen_rand_hv(dimension, p=0.5) -> list[int]:
     """! function copied from stef: function to generate a random binary hypervector
-    @param D: Dimension of the hypervector
+    @param dimension: Dimension of the hypervector
     @param p: Density level of 1s
     @return: List of generated binary hypervector, [1, 0, 1, 0, ...]
     """
     #use long index list, generate range and then permute them
-    # and set all numbers < p*D to 1 to get right density
-    hv = [*range(D)]
+    # and set all numbers < p*dimension to 1 to get right density
+    hv = [*range(dimension)]
     np.random.shuffle(hv)
     for i in range(len(hv)):
-        if hv[i] < p*D:
+        if hv[i] < p*dimension:
             hv[i] = 1
         else:
             hv[i] = 0
@@ -26,11 +26,11 @@ def bundle_dense(block) -> np.ndarray:
     @param block: Input block of hypervectors
     @return: Combined hypervector
     """
-    if ((len(block)%2) == 0):
+    if((len(block)%2) == 0):
         block = block[0:len(block)-1]
     sums = np.sum(block, axis = 0)
     for x in range(len(sums)):
-        if (sums[x] <= (len(block))/2):
+        if(sums[x] <= (len(block))/2):
             sums[x] = 0
         else:
             sums[x] = 1
@@ -176,7 +176,8 @@ def run_hdc(regenerate_hypervector: bool = True,
     spike_class = np.append(spike_class, 0)  # append 0 for non-spiking window
     class_set = sorted(set(spike_class))
     num_of_class = len(class_set)
-    training_spike_class = [int(spike_class[window_having_spike.index(i)] if i in window_having_spike else 0) for i in range(num_of_training_windows)]
+    training_spike_class = [int(spike_class[window_having_spike.index(i)] if i in window_having_spike else 0)
+                            for i in range(num_of_training_windows)]
 
     # training on spike signals
     logging.info("S1: Calculate hypervectors per window...")
@@ -318,7 +319,8 @@ def run_hdc_inference(
     spike_class = spike_class[0: len(spike_times_to_end)]
     spike_class = spike_class[-len(spike_times):]
     assert len(spike_class) == len(spike_times), "Spike class length does not match spike times length."
-    inference_spike_class = [int(spike_class[window_having_spike.index(i)] if i in window_having_spike else 0) for i in range(num_of_inference_windows)]
+    inference_spike_class = [int(spike_class[window_having_spike.index(i)] if i in window_having_spike else 0)
+                             for i in range(num_of_inference_windows)]
 
     # generate hypervectors for inference windows
     logging.info("S1: Calculate hypervectors per window for inference...")
@@ -347,12 +349,13 @@ def run_hdc_inference(
     num_correct_spike_inferred = sum(1 for i in range(len(inference_spike_labels_inferred))
                       if inference_spike_labels_inferred[i] == inference_spike_labels[i])
     num_incorrect_spike_inferred = len(inference_spike_labels_inferred) - num_correct_spike_inferred
-    correct_identify_ratio = num_correct_spike_inferred / len(inference_spike_labels_inferred) if inference_spike_labels_inferred else 0
+    correct_identify_ratio = num_correct_spike_inferred / len(inference_spike_labels_inferred)
 
+    # num_correct_class_inferred: include both zero class and non-zero classes
     num_correct_class_inferred = sum(1 for i in range(len(inference_spike_class_inferred))
-                                      if inference_spike_class_inferred[i] == inference_spike_class[i])  # include zero class
+                                      if inference_spike_class_inferred[i] == inference_spike_class[i])
     num_incorrect_class_inferred = len(inference_spike_class_inferred) - num_correct_class_inferred
-    class_identify_ratio = num_correct_class_inferred / len(inference_spike_class_inferred) if inference_spike_class_inferred else 0
+    class_identify_ratio = num_correct_class_inferred / len(inference_spike_class_inferred)
 
     logging.info(f"Correct spike identifications: {num_correct_spike_inferred} ({correct_identify_ratio:.2%})")
     logging.info(f"Correct class identifications: {num_correct_class_inferred} ({class_identify_ratio:.2%})")
@@ -360,7 +363,7 @@ def run_hdc_inference(
     breakpoint()
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(filename)s - %(lineno)d - %(message)s')
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(lineno)d - %(message)s")
 
     # parameters
     regenerate_hypervector = False
