@@ -31,3 +31,9 @@ There are following parameters:
 *testcase_folder*: [str] the folder of input signal files.
 
 *testcase_list*: [list[str]] a list of training testcases.
+
+## To plot the signals
+
+`Quiroga_read.py` can be used for plotting signals. It has the following parameters:
+
+*time_to_plot*: [float] how long the time to plot in the png.
