@@ -66,7 +66,7 @@ def run_hdc(regenerate_hypervector: bool = True,
             testcase: str = "C_Easy1_noise005.mat",
             hv_length: int = 1024,
             im_hv_count: int = 401,
-            em_hv_count: int = 10,
+            em_hv_count: int = 100,
             training_window_length: int = 256,
             fs: int = 24000,
             training_time: float = 0.5) -> any:
@@ -158,9 +158,10 @@ def run_hdc(regenerate_hypervector: bool = True,
         for j in range(len(window)):
             signal_hv: list = []
             signal_level = window[j]
-            signal_to_im = IM[int((signal_level + 2) * 100)]
+            signal_to_im = IM[int((signal_level + 2) * 100)] # the map is [-2, 2] -> [0, 401]
             ## TODO: decode spike class or not?
-            signal_hv.append(signal_to_im)
+            # signal_hv.append(signal_to_im)
+            signal_hv.append(np.logical_xor(signal_to_im, EM[j])) # use EM to represent timing
             # signal_hv.append(np.logical_xor(signal_to_im, EM[spike_class]))  # use EM to represent spike class (include 0)
             ## TODO: finish
             # compress signal_hv
@@ -231,10 +232,11 @@ def run_hdc(regenerate_hypervector: bool = True,
 
     logging.debug(f"Min Hamming distance across classes: {min_dist_across_class}")
     suggested_threshold = min_dist_across_class
-    print(average_hamming_dist_per_class)
-    print(hamming_dist_across_class)
+    logging.info(average_hamming_dist_per_class)
+    logging.info(hamming_dist_across_class)
     # expect the distance within each class is small but big across classes
-    # not the truth now
+    # it needs to be analyzed by checking average_hamming_dist_per_class and hamming_dist_across_class
+    # it currently is suggested to at 450
     breakpoint()
     return hv_per_class_dict, hv_all_classes, suggested_threshold
 
