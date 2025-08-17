@@ -16,25 +16,25 @@ def u_gen_rand_hv(D,p=0.5) -> list[int]:
     np.random.shuffle(hv)
     for i in range(len(hv)):
         if hv[i] < p*D:
-          hv[i] = 1
+            hv[i] = 1
         else:
-          hv[i] = 0
+            hv[i] = 0
     return hv
 
 def bundle_dense(block) -> np.ndarray:
-  """! Copied from stef: Combine dense blocks by majority voting
-  @param block: Input block of hypervectors
-  @return: Combined hypervector
-  """
-  if ((len(block)%2) == 0):
-     block = block[0:len(block)-1]
-  sums = np.sum(block, axis = 0)
-  for x in range(len(sums)):
-    if (sums[x] <= (len(block))/2):
-      sums[x] = 0
-    else:
-      sums[x] = 1
-  return sums
+    """! Copied from stef: Combine dense blocks by majority voting
+    @param block: Input block of hypervectors
+    @return: Combined hypervector
+    """
+    if ((len(block)%2) == 0):
+        block = block[0:len(block)-1]
+    sums = np.sum(block, axis = 0)
+    for x in range(len(sums)):
+        if (sums[x] <= (len(block))/2):
+            sums[x] = 0
+        else:
+            sums[x] = 1
+    return sums
 
 def generate_hypervector(hv_length: int = 1024, hv_count: int = 401) -> dict:
     """! Generate hypervector for different signal levels
@@ -60,6 +60,47 @@ def calc_hamming_distance(hv1, hv2) -> int:
     assert np.all((hv2 == 0) | (hv2 == 1)), "hv2 must only contain 0 or 1"
     # return np.sum(np.array(hv1) != np.array(hv2))
     return int(sum(np.logical_xor(hv1, hv2)))
+
+def load_hypervector(file_path: str) -> dict:
+    """! Load hypervectors from a file
+    @param file_path: Path to the file containing hypervectors
+    @return: Dictionary of hypervectors
+    """
+    hv_dict = {}
+    with open(file_path, "r") as f:
+        for i, line in enumerate(f):
+            hv_dict[i] = list(map(int, line[1: -2].split(",")))
+    return hv_dict
+
+def calc_hdc_of_windows(
+    training_sequence: list,
+    IM: dict,
+    EM: dict,
+    training_window_length: int,
+) -> list:
+    """! Calculate HDC for each training window
+    @param training_sequence: List of training sequences
+    @param IM: Input hypervectors
+    @param EM: Encoding hypervectors
+    @param training_window_length: Length of the training window
+    @return: List of hypervectors for each training window
+    """
+    num_of_training_windows = len(training_sequence) // training_window_length
+    hv_list: list = []  # record of hypervectors of different windows
+    for i in tqdm.tqdm(range(num_of_training_windows), ascii="░▒█", desc="Training windows"):
+        window = training_sequence[i * training_window_length: (i + 1) * training_window_length]
+        # process the window
+        block_hv: list = []
+        for j in range(len(window)):
+            signal_hv: list = []
+            signal_level = window[j]
+            signal_to_im = IM[int((signal_level + 2) * 100)] # the map is [-2, 2] -> [0, 401]
+            signal_hv.append(np.logical_xor(signal_to_im, EM[j])) # use EM to represent timing
+            # compress signal_hv
+            compressed_signal_hv = bundle_dense(signal_hv)
+            block_hv.append(compressed_signal_hv)
+        hv_list.append(bundle_dense(block_hv))
+    return hv_list
 
 def run_hdc(regenerate_hypervector: bool = True,
             testcase_folder: str = "../yunzhu/",
@@ -95,18 +136,8 @@ def run_hdc(regenerate_hypervector: bool = True,
                 f.write(f"{value}\n")
     else:
         # load from files
-        IM = {}
-        EM = {}
-        with open(f"{testcase_folder}IM_hv.txt", "r") as f:
-            i = 0
-            for line in f:
-                IM[i] = list(map(int, line[1: -2].split(",")))
-                i += 1
-        with open(f"{testcase_folder}EM_hv.txt", "r") as f:
-            i = 0
-            for line in f:
-                EM[i] = list(map(int, line[1: -2].split(",")))
-                i += 1
+        IM = load_hypervector(f"{testcase_folder}IM_hv.txt")
+        EM = load_hypervector(f"{testcase_folder}EM_hv.txt")
 
     # load the sample
     matlab_source_data = sio.loadmat(f"{testcase_folder}{testcase}")
@@ -123,13 +154,12 @@ def run_hdc(regenerate_hypervector: bool = True,
     # training
     logging.info("Training...")
 
-    training_sequence = recording_traces[0: int(fs * training_time)]
-    num_of_training_windows = len(training_sequence) // training_window_length
-    training_hv: list = []  # record of hypervectors of different windows
     training_spike_labels: list = []  # record of spike labels for different windows
     training_spike_class: list = []  # record of spike class for different windows
 
     # generate spike labels for windows
+    training_sequence = recording_traces[0: int(fs * training_time)]
+    num_of_training_windows = len(training_sequence) // training_window_length
     spike_times = spike_times[spike_times <= int(fs * training_time)]
     window_having_spike = [int(t // training_window_length) for t in spike_times]
     training_spike_labels = [1 if i in window_having_spike else 0 for i in range(num_of_training_windows)]
@@ -150,31 +180,19 @@ def run_hdc(regenerate_hypervector: bool = True,
 
     # training on spike signals
     logging.info("S1: Calculate hypervectors per window...")
-    for i in tqdm.tqdm(range(num_of_training_windows), ascii="░▒█", desc="Training windows"):
-        window = training_sequence[i * training_window_length: (i + 1) * training_window_length]
-        spike_class = training_spike_class[i]
-        # process the window
-        block_hv: list = []
-        for j in range(len(window)):
-            signal_hv: list = []
-            signal_level = window[j]
-            signal_to_im = IM[int((signal_level + 2) * 100)] # the map is [-2, 2] -> [0, 401]
-            ## TODO: decode spike class or not?
-            # signal_hv.append(signal_to_im)
-            signal_hv.append(np.logical_xor(signal_to_im, EM[j])) # use EM to represent timing
-            # signal_hv.append(np.logical_xor(signal_to_im, EM[spike_class]))  # use EM to represent spike class (include 0)
-            ## TODO: finish
-            # compress signal_hv
-            compressed_signal_hv = bundle_dense(signal_hv)
-            block_hv.append(compressed_signal_hv)
-        training_hv.append(bundle_dense(block_hv))
+    training_hv = calc_hdc_of_windows(
+        training_sequence=training_sequence,
+        IM=IM,
+        EM=EM,
+        training_window_length=training_window_length
+    )
 
     logging.info("S2: Compress hypervectors per class...")
     # convert to np.array for ease of operations
     training_hv = np.array(training_hv)
     training_spike_labels = np.array(training_spike_labels)
     training_spike_class = np.array(training_spike_class)
-    
+
     hv_per_class: list = []
     hv_per_class_dict: dict = {}
     zero_in_class = False
@@ -188,6 +206,7 @@ def run_hdc(regenerate_hypervector: bool = True,
             zero_in_class = True
 
     logging.info("S3: Compress hypervectors for all classes...")
+    ## can be used to detect if a window has a spike or not
     if zero_in_class:
         hv_per_class_nz = np.array(hv_per_class[1:])  # remove the zero class
     else:
@@ -216,32 +235,132 @@ def run_hdc(regenerate_hypervector: bool = True,
     logging.debug(f"Average Hamming distance per class: {average_hamming_dist_per_class}")
     logging.debug(f"3 Std Hamming distance per class: {three_std_hamming_dist_per_class}")
 
-    # TODO: to be continued
     # S2: calculate the Hamming distance across class
-    min_dist_across_class = float("inf")
+    min_dist_across_class = float("inf")  # used to check the minimal Hamming distance
+    # dict to save Hamming distances from one class to other classes
     hamming_dist_across_class: dict = {}
+    class_id_list: list = list(hv_per_class_dict.keys())
     for i in range(len(hv_per_class)):
         hamming_dist_list = []
+        all_hv_in_class = training_hv[training_spike_class == class_id_list[i]]
         for j in range(len(hv_per_class)):
             if i == j:
                 continue
-            hamming_dist = calc_hamming_distance(hv_per_class[i], hv_per_class[j])
-            hamming_dist_list.append(hamming_dist)
-            min_dist_across_class = min(min_dist_across_class, hamming_dist)
+            hamming_dist_per_hv: list = []
+            for k in range(len(all_hv_in_class)):
+                hamming_dist = calc_hamming_distance(all_hv_in_class[k], hv_per_class[j])
+                hamming_dist_per_hv.append(hamming_dist)
+                min_dist_across_class = min(min_dist_across_class, hamming_dist)
+            hamming_dist_list.append(int(np.mean(hamming_dist_per_hv)))
         hamming_dist_across_class[i] = hamming_dist_list
 
     logging.debug(f"Min Hamming distance across classes: {min_dist_across_class}")
     suggested_threshold = min_dist_across_class
-    logging.info(average_hamming_dist_per_class)
-    logging.info(hamming_dist_across_class)
+    logging.info(f"Average Hamming distance per class: {average_hamming_dist_per_class}")
+    logging.info(f"Hamming distance from a class to other classes: {hamming_dist_across_class}")
     # expect the distance within each class is small but big across classes
     # it needs to be analyzed by checking average_hamming_dist_per_class and hamming_dist_across_class
     # it currently is suggested to at 450
-    breakpoint()
     return hv_per_class_dict, hv_all_classes, suggested_threshold
 
+def run_hdc_inference(
+        hv_per_class_dict: dict,
+        hv_all_classes: np.array,
+        hamming_threshold: float,
+        testcase_folder: str = "./",
+        testcase: str = "C_Easy1_noise005.mat",
+        fs: int = 24000,
+        inference_start_time: float = 1.0,
+        inference_end_time: float = 2.0,
+        inference_window_length: int = 30,
+        ):
+    """! Run HDC inference on the given hypervectors.
+    @param hv_per_class_dict: Hypervectors for each class (include "zero" class)
+    @param hv_all_classes: Hypervectors for all non-zero classes (not used)
+    @param hamming_threshold: Hamming distance threshold (not used yet, use relative comparison currently)
+    """
+    # load hv from files
+    IM = load_hypervector(f"{testcase_folder}IM_hv.txt")  # for signal level
+    EM = load_hypervector(f"{testcase_folder}EM_hv.txt")  # for signal timing
+
+    # load the inference sample
+    matlab_source_data = sio.loadmat(f"{testcase_folder}{testcase}")
+    recording_traces = matlab_source_data["data"][0]
+    spike_times = matlab_source_data["spike_times"][0][0][0]
+    spike_times += 24  # 24 is for label correction
+    spike_class = matlab_source_data["spike_class"][0][0][0]
+
+    # inference
+    logging.info("Inference...")
+
+    inference_sequence = recording_traces[int(fs * inference_start_time): int(fs * inference_end_time)]
+    num_of_inference_windows = len(inference_sequence) // inference_window_length
+    inference_hv: list = []  # record of hypervectors of different windows
+    inference_spike_labels: list = []  # record of spike labels for different windows (reference)
+    inference_spike_class: list = []  # record of spike class for different windows (reference)
+    inference_spike_labels_inferred: list = []  # record of spike labels for different windows (inferred)
+    inference_spike_class_inferred: list = []  # record of spike class for different windows (inferred)
+
+    # generate spike labels for windows (reference)
+    spike_times_to_end = spike_times[spike_times <= int(fs * inference_end_time)]
+    spike_times = spike_times_to_end[spike_times_to_end >= int(fs * inference_start_time)]
+    window_having_spike = [int((t - fs * inference_start_time) // inference_window_length) for t in spike_times]
+    inference_spike_labels = [1 if i in window_having_spike else 0 for i in range(num_of_inference_windows)]
+
+    # check the minimal diff of spike time (reference)
+    spike_times_diff = [spike_times[i+1] - spike_times[i] for i in range(len(spike_times) - 1)]
+    spike_times_diff_min = np.min(spike_times_diff) if spike_times_diff else 0
+    if spike_times_diff_min < inference_window_length:
+        logging.warning(f"Spike times ({spike_times_diff_min}) are too close to the window length "
+                        f"{inference_window_length}, may cause issues in inference.")
+
+    # generate spike class for windows (reference)
+    spike_class = spike_class[0: len(spike_times_to_end)]
+    spike_class = spike_class[-len(spike_times):]
+    assert len(spike_class) == len(spike_times), "Spike class length does not match spike times length."
+    inference_spike_class = [int(spike_class[window_having_spike.index(i)] if i in window_having_spike else 0) for i in range(num_of_inference_windows)]
+
+    # generate hypervectors for inference windows
+    logging.info("S1: Calculate hypervectors per window for inference...")
+    inference_hv = calc_hdc_of_windows(
+        training_sequence=inference_sequence,
+        IM=IM,
+        EM=EM,
+        training_window_length=inference_window_length,
+    )
+
+    # similarity check for each window
+    logging.info("S2: Check similarity for each window...")
+    for i in tqdm.tqdm(range(len(inference_hv)), ascii="░▒▓█", desc="Inference windows"):
+        # calculate similarity with each class
+        similarities = {}
+        for class_name, class_hv in hv_per_class_dict.items():
+            hamming_distance = calc_hamming_distance(inference_hv[i], class_hv)
+            similarities[class_name] = hamming_distance
+
+        # find the class with the highest similarity
+        inferred_class = int(min(similarities, key=similarities.get))
+        inference_spike_labels_inferred.append(1 if inferred_class != 0 else 0)
+        inference_spike_class_inferred.append(inferred_class)
+
+    # compare with the reference and count the correct/incorrect classifications
+    num_correct_spike_inferred = sum(1 for i in range(len(inference_spike_labels_inferred))
+                      if inference_spike_labels_inferred[i] == inference_spike_labels[i])
+    num_incorrect_spike_inferred = len(inference_spike_labels_inferred) - num_correct_spike_inferred
+    correct_identify_ratio = num_correct_spike_inferred / len(inference_spike_labels_inferred) if inference_spike_labels_inferred else 0
+
+    num_correct_class_inferred = sum(1 for i in range(len(inference_spike_class_inferred))
+                                      if inference_spike_class_inferred[i] == inference_spike_class[i])  # include zero class
+    num_incorrect_class_inferred = len(inference_spike_class_inferred) - num_correct_class_inferred
+    class_identify_ratio = num_correct_class_inferred / len(inference_spike_class_inferred) if inference_spike_class_inferred else 0
+
+    logging.info(f"Correct spike identifications: {num_correct_spike_inferred} ({correct_identify_ratio:.2%})")
+    logging.info(f"Correct class identifications: {num_correct_class_inferred} ({class_identify_ratio:.2%})")
+
+    breakpoint()
+
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(filename)s - %(lineno)d - %(message)s')
 
     # parameters
     regenerate_hypervector = False
@@ -260,4 +379,15 @@ if __name__ == "__main__":
                 training_window_length=training_window_length,
                 fs=fs,
                 training_time=training_time)
+        run_hdc_inference(
+            hv_per_class_dict=hv_per_class_dict,
+            hv_all_classes=hv_all_classes,
+            hamming_threshold=450,
+            testcase_folder=testcase_folder,
+            testcase=testcase,
+            fs=fs,
+            inference_start_time=training_time,
+            inference_end_time=training_time + 10,
+            inference_window_length=training_window_length,
+        )
         breakpoint()
