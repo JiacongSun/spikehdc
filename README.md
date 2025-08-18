@@ -37,3 +37,14 @@ There are following parameters:
 `Quiroga_read.py` can be used for plotting signals. It has the following parameters:
 
 *time_to_plot*: [float] how long the time to plot in the png.
+
+
+## TODOs
+
+- The test dataset is old. To replace with new ones (multi-channel) and retest.
+
+- The classical frontend is already with low power. HDC can be combined with the classical frontend, which detects spikes first to save power for HDC.
+
+- Look for some references works, check their accuracy and hardware performance.
+
+- Classical algorithms can achieve >97% accuracy, but HDC can only get >80%. The accuracy gap is to be fixed.

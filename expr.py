@@ -149,7 +149,7 @@ def run_hdc(regenerate_hypervector: bool = True,
     # assertion: curent IM supports range [-2, -2] with a step of 0.01
     recording_min = np.min(recording_traces)
     recording_max = np.max(recording_traces)
-    assert recording_min >= -2.01 and recording_max <= 2.01, "Recording traces are out of bounds."
+    assert recording_min >= -2.01 and recording_max <= 2.02, f"Recording traces [{recording_min}, {recording_max}] are out of bounds."
 
     # training
     logging.info("Training...")
@@ -360,13 +360,12 @@ def run_hdc_inference(
     logging.info(f"Correct spike identifications: {num_correct_spike_inferred} ({correct_identify_ratio:.2%})")
     logging.info(f"Correct class identifications: {num_correct_class_inferred} ({class_identify_ratio:.2%})")
 
-    breakpoint()
-
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(lineno)d - %(message)s")
 
     # parameters
     regenerate_hypervector = False
+    hv_length = 1024
     fs = 24000 # sampling frequency (Hz)
     training_time = 0.5 # seconds
     training_window_length = 30 # number of samples
@@ -381,7 +380,9 @@ if __name__ == "__main__":
                 testcase=testcase,
                 training_window_length=training_window_length,
                 fs=fs,
-                training_time=training_time)
+                training_time=training_time,
+                hv_length=hv_length,
+                )
         run_hdc_inference(
             hv_per_class_dict=hv_per_class_dict,
             hv_all_classes=hv_all_classes,
