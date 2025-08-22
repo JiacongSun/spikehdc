@@ -48,3 +48,19 @@ There are following parameters:
 - Look for some references works, check their accuracy and hardware performance.
 
 - Classical algorithms can achieve >97% accuracy, but HDC can only get >80%. The accuracy gap is to be fixed.
+
+## TODOs
+
+- ✅ Apply Item Memory on signal level.
+- ☐ Apply sliding windows.
+- ✅ Apply circular shift for timing.
+- ☐ Apply the frontend detection
+
+Classification accuracy recording:
+
+Dataset: Easy1, training: 0.5s, test: 0.5s-10.5s
+
+baseline: 86.44%
++ circular shift: 89.5%
++ item memory: 
++ frontend detection:

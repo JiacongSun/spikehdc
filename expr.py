@@ -3,6 +3,7 @@ import numpy as np
 import scipy.io as sio
 import matplotlib.pyplot as plt
 import tqdm
+import copy
 
 def u_gen_rand_hv(dimension, p=0.5) -> list[int]:
     """! function copied from stef: function to generate a random binary hypervector
@@ -50,7 +51,39 @@ def generate_hypervector(hv_length: int = 1024, hv_count: int = 401) -> dict:
         hv_dict[i] = new_hv
     return hv_dict
 
-def calc_hamming_distance(hv1, hv2) -> int:
+def generate_item_hypervector(
+        hv_length: int = 1024,
+        hv_count: int = 401,
+        end_distance: float = 1,
+        ) -> dict:
+    """! Generate hypervector for different signal levels with item memory
+    @param hv_length: Length of the hypervector
+    @param hv_count: Number of hypervectors to generate
+    @param end_distance: End distance for the hypervectors, [0, 1]
+    """
+    logging.info("Generating item hypervector...")
+    hv_dict = {}
+    clip_size: float = hv_length * end_distance / hv_count
+    new_hv: list = u_gen_rand_hv(hv_length)
+    hv_init: np.ndarray = np.array(copy.deepcopy(new_hv), dtype=int)
+    for i in range(hv_count):
+        hv_dict[i] = new_hv
+        clip_start = round(clip_size * i)
+        clip_end = round(clip_size * (i + 1))
+        clip = new_hv[clip_start: clip_end] if clip_end <= hv_length else new_hv[
+            clip_start: hv_length]
+        flipped_clip = [0 if bit == 1 else 1 for bit in clip]
+        new_hv = np.concatenate(
+            (new_hv[:clip_start], flipped_clip, new_hv[clip_end:]))
+        new_hv = np.array(new_hv, dtype=int)
+        new_hv = new_hv.tolist()
+    # logging
+    end_hamming_distance = calc_hamming_distance(hv_init, np.array(new_hv))
+    logging.info(f"End Hamming distance: "
+                 f"{end_hamming_distance} ({end_hamming_distance / hv_length:.2%})")
+    return hv_dict
+
+def calc_hamming_distance(hv1: np.ndarray, hv2: np.ndarray) -> int:
     """! Calculate the Hamming distance between two hypervectors
     @param hv1: First hypervector
     @param hv2: Second hypervector
@@ -95,6 +128,7 @@ def calc_hdc_of_windows(
             signal_hv: list = []
             signal_level = window[j]
             signal_to_im = IM[int((signal_level + 2) * 100)] # the map is [-2, 2] -> [0, 401]
+            # signal_hv.append( np.roll(signal_to_im, j).tolist() )
             signal_hv.append(np.logical_xor(signal_to_im, EM[j])) # use EM to represent timing
             # compress signal_hv
             compressed_signal_hv = bundle_dense(signal_hv)
@@ -125,19 +159,20 @@ def run_hdc(regenerate_hypervector: bool = True,
     logging.info("Running HDC...")
     # Generate hypervectors if needed
     if regenerate_hypervector:
-        IM = generate_hypervector(hv_length=hv_length, hv_count=im_hv_count)
-        EM = generate_hypervector(hv_length=hv_length, hv_count=em_hv_count)
+        # IM = generate_hypervector(hv_length=hv_length, hv_count=im_hv_count)
+        IM = generate_item_hypervector(hv_length=hv_length, hv_count=im_hv_count, end_distance=1)
+        # EM = generate_hypervector(hv_length=hv_length, hv_count=em_hv_count)
         # write to files
         with open(f"{testcase_folder}IM_hv.txt", "w") as f:
             for key, value in IM.items():
                 f.write(f"{value}\n")
-        with open(f"{testcase_folder}EM_hv.txt", "w") as f:
-            for key, value in EM.items():
-                f.write(f"{value}\n")
+        # with open(f"{testcase_folder}EM_hv.txt", "w") as f:
+        #     for key, value in EM.items():
+        #         f.write(f"{value}\n")
     else:
         # load from files
         IM = load_hypervector(f"{testcase_folder}IM_hv.txt")
-        EM = load_hypervector(f"{testcase_folder}EM_hv.txt")
+    EM = load_hypervector(f"{testcase_folder}EM_hv.txt")
 
     # load the sample
     matlab_source_data = sio.loadmat(f"{testcase_folder}{testcase}")
@@ -149,7 +184,8 @@ def run_hdc(regenerate_hypervector: bool = True,
     # assertion: curent IM supports range [-2, -2] with a step of 0.01
     recording_min = np.min(recording_traces)
     recording_max = np.max(recording_traces)
-    assert recording_min >= -2.01 and recording_max <= 2.02, f"Recording traces [{recording_min}, {recording_max}] are out of bounds."
+    assert recording_min >= -2.01 and recording_max <= 2.02, \
+        f"Recording traces [{recording_min}, {recording_max}] are out of bounds."
 
     # training
     logging.info("Training...")
@@ -364,7 +400,7 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(lineno)d - %(message)s")
 
     # parameters
-    regenerate_hypervector = False
+    regenerate_hypervector = True
     hv_length = 1024
     fs = 24000 # sampling frequency (Hz)
     training_time = 0.5 # seconds
