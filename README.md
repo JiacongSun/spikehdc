@@ -59,7 +59,7 @@ There are following parameters:
 - ☐ Fix accuracy calculation function.
 - ☐ Add Delft dataset.
 - ☐ Add runtime training.
-- ☐ Add standard calculation for threshold (OR Delft: zi zu zhi wang luo).
+- ☐ Add standard calculation for threshold (OR Delft: SOM zi zu zhi wang luo).
 
 Classification accuracy recording:
 
