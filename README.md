@@ -51,16 +51,29 @@ There are following parameters:
 
 ## TODOs
 
-- ✅ Apply Item Memory on signal level.
-- ☐ Apply sliding windows.
 - ✅ Apply circular shift for timing.
-- ☐ Apply the frontend detection
+- ✅ Apply Item Memory on signal level.
+- ✅ Apply the frontend detection.
+- ❎ Apply sliding windows.
+- ☐ Add Neo-DVT frontend.
+- ☐ Fix accuracy calculation function.
+- ☐ Add Delft dataset.
+- ☐ Add runtime training.
+- ☐ Add standard calculation for threshold (OR Delft: zi zu zhi wang luo).
 
 Classification accuracy recording:
 
-Dataset: Easy1, training: 0.5s, test: 0.5s-10.5s
+Dataset: Easy1_noise005, training: 0.5s, test: 0.5s-10.5s
 
 baseline: 86.44%
 + circular shift: 89.5%
-+ item memory: 
-+ frontend detection:
++ item memory: 94.24%
++ frontend detection: 99.00%
+
+Dataset: Easy2_noise005, training: 0.5s, test: 0.5s-10.5s
+baseline: 85.81%
++ circular shift: 90.88%
++ item memory: 94.2%
++ frontend detection: 98.62%
+
+

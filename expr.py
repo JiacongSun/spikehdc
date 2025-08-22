@@ -128,8 +128,8 @@ def calc_hdc_of_windows(
             signal_hv: list = []
             signal_level = window[j]
             signal_to_im = IM[int((signal_level + 2) * 100)] # the map is [-2, 2] -> [0, 401]
-            # signal_hv.append( np.roll(signal_to_im, j).tolist() )
-            signal_hv.append(np.logical_xor(signal_to_im, EM[j])) # use EM to represent timing
+            signal_hv.append( np.roll(signal_to_im, j).tolist() ) # use circular shift to represent timing
+            # signal_hv.append(np.logical_xor(signal_to_im, EM[j])) # use EM to represent timing
             # compress signal_hv
             compressed_signal_hv = bundle_dense(signal_hv)
             block_hv.append(compressed_signal_hv)
@@ -144,7 +144,8 @@ def run_hdc(regenerate_hypervector: bool = True,
             em_hv_count: int = 100,
             training_window_length: int = 256,
             fs: int = 24000,
-            training_time: float = 0.5) -> any:
+            training_time: float = 0.5,
+            with_front_end: bool = False) -> any:
     """! Run the HDC process
     @param regenerate_hypervector: Whether to regenerate hypervectors
     @param testcase_folder: Folder containing the test cases
@@ -155,24 +156,25 @@ def run_hdc(regenerate_hypervector: bool = True,
     @param training_window_length: Length of the training window
     @param fs: Sampling frequency (Hz)
     @param training_time: Training time (seconds)
+    @param with_front_end: If with front end precisely monitoring spikes
     """
     logging.info("Running HDC...")
     # Generate hypervectors if needed
     if regenerate_hypervector:
         # IM = generate_hypervector(hv_length=hv_length, hv_count=im_hv_count)
         IM = generate_item_hypervector(hv_length=hv_length, hv_count=im_hv_count, end_distance=1)
-        # EM = generate_hypervector(hv_length=hv_length, hv_count=em_hv_count)
+        EM = generate_hypervector(hv_length=hv_length, hv_count=em_hv_count)
         # write to files
         with open(f"{testcase_folder}IM_hv.txt", "w") as f:
             for key, value in IM.items():
                 f.write(f"{value}\n")
-        # with open(f"{testcase_folder}EM_hv.txt", "w") as f:
-        #     for key, value in EM.items():
-        #         f.write(f"{value}\n")
+        with open(f"{testcase_folder}EM_hv.txt", "w") as f:
+            for key, value in EM.items():
+                f.write(f"{value}\n")
     else:
         # load from files
         IM = load_hypervector(f"{testcase_folder}IM_hv.txt")
-    EM = load_hypervector(f"{testcase_folder}EM_hv.txt")
+        EM = load_hypervector(f"{testcase_folder}EM_hv.txt")
 
     # load the sample
     matlab_source_data = sio.loadmat(f"{testcase_folder}{testcase}")
@@ -209,16 +211,34 @@ def run_hdc(regenerate_hypervector: bool = True,
 
     # generate spike class for windows
     spike_class = spike_class[0: len(spike_times)]
-    spike_class = np.append(spike_class, 0)  # append 0 for non-spiking window
+    if not with_front_end:
+        spike_class = np.append(spike_class, 0)  # append 0 for non-spiking window
     class_set = sorted(set(spike_class))
-    num_of_class = len(class_set)
     training_spike_class = [int(spike_class[window_having_spike.index(i)] if i in window_having_spike else 0)
                             for i in range(num_of_training_windows)]
+
+    ######################################################
+    ## To be replaced with real frontend processing alg.
+    # add frontend processing (only keep spike windows)
+    if with_front_end:
+        training_sequence_processed = np.array([])
+        for tim in spike_times:
+            seq_clipped = recording_traces[tim - training_window_length//2: tim + training_window_length//2]
+            training_sequence_processed = np.append(training_sequence_processed, seq_clipped)
+        training_spike_labels = np.ones(len(training_sequence_processed) // training_window_length)
+        training_spike_class = spike_class
+        assert len(training_spike_class) == len(training_spike_labels), \
+            f"Training spike class and labels must have the same length."
+    else:
+        training_sequence_processed = training_sequence
+        training_spike_labels = training_spike_labels
+        training_spike_class = training_spike_class
+    ######################################################
 
     # training on spike signals
     logging.info("S1: Calculate hypervectors per window...")
     training_hv = calc_hdc_of_windows(
-        training_sequence=training_sequence,
+        training_sequence=training_sequence_processed,
         IM=IM,
         EM=EM,
         training_window_length=training_window_length
@@ -302,19 +322,23 @@ def run_hdc(regenerate_hypervector: bool = True,
 
 def run_hdc_inference(
         hv_per_class_dict: dict,
-        hv_all_classes: np.array,
-        hamming_threshold: float,
         testcase_folder: str = "./",
         testcase: str = "C_Easy1_noise005.mat",
         fs: int = 24000,
         inference_start_time: float = 1.0,
         inference_end_time: float = 2.0,
         inference_window_length: int = 30,
+        with_front_end: bool = False,
         ):
     """! Run HDC inference on the given hypervectors.
     @param hv_per_class_dict: Hypervectors for each class (include "zero" class)
-    @param hv_all_classes: Hypervectors for all non-zero classes (not used)
-    @param hamming_threshold: Hamming distance threshold (not used yet, use relative comparison currently)
+    @param testcase_folder: Folder containing the test case files
+    @param testcase: Name of the test case file
+    @param fs: Sampling frequency
+    @param inference_start_time: Inference start time
+    @param inference_end_time: Inference end time
+    @param inference_window_length: Inference window length
+    @param with_front_end: If with front end precisely monitoring spikes
     """
     # load hv from files
     IM = load_hypervector(f"{testcase_folder}IM_hv.txt")  # for signal level
@@ -344,7 +368,7 @@ def run_hdc_inference(
     window_having_spike = [int((t - fs * inference_start_time) // inference_window_length) for t in spike_times]
     inference_spike_labels = [1 if i in window_having_spike else 0 for i in range(num_of_inference_windows)]
 
-    # check the minimal diff of spike time (reference)
+    # check the minimal diff of spike time (in reference)
     spike_times_diff = [spike_times[i+1] - spike_times[i] for i in range(len(spike_times) - 1)]
     spike_times_diff_min = np.min(spike_times_diff) if spike_times_diff else 0
     if spike_times_diff_min < inference_window_length:
@@ -358,10 +382,28 @@ def run_hdc_inference(
     inference_spike_class = [int(spike_class[window_having_spike.index(i)] if i in window_having_spike else 0)
                              for i in range(num_of_inference_windows)]
 
+    ######################################################
+    ## To be replaced with real frontend processing alg.
+    # add frontend processing (only keep spike windows)
+    if with_front_end:
+        inference_sequence_processed = np.array([])
+        for tim in spike_times:
+            seq_clipped = recording_traces[tim - inference_window_length//2: tim + inference_window_length//2]
+            inference_sequence_processed = np.append(inference_sequence_processed, seq_clipped)
+        inference_spike_labels = np.ones(len(inference_sequence_processed) // inference_window_length)
+        inference_spike_class = spike_class
+        assert len(inference_spike_class) == len(inference_spike_labels), \
+            f"Inference spike class and labels must have the same length."
+    else:
+        inference_sequence_processed = inference_sequence
+        inference_spike_labels = inference_spike_labels
+        inference_spike_class = inference_spike_class
+    ######################################################
+
     # generate hypervectors for inference windows
     logging.info("S1: Calculate hypervectors per window for inference...")
     inference_hv = calc_hdc_of_windows(
-        training_sequence=inference_sequence,
+        training_sequence=inference_sequence_processed,
         IM=IM,
         EM=EM,
         training_window_length=inference_window_length,
@@ -400,14 +442,18 @@ if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(lineno)d - %(message)s")
 
     # parameters
-    regenerate_hypervector = True
+    regenerate_hypervector = False
+    with_front_end = True
     hv_length = 1024
     fs = 24000 # sampling frequency (Hz)
     training_time = 0.5 # seconds
     training_window_length = 30 # number of samples
-    testcase_folder = "./"
-    testcase_list = ["C_Easy1_noise005.mat",
-                     "C_Easy2_noise005.mat"]
+    testcase_folder = "./quiroga/"
+    testcase_list = [
+        # "C_Easy1_noise005.mat",
+        # "C_Easy2_noise005.mat",
+        "C_Difficult2_noise015.mat",
+                    ]
 
     for testcase in testcase_list:
         hv_per_class_dict, hv_all_classes, suggested_threshold = run_hdc(
@@ -418,16 +464,16 @@ if __name__ == "__main__":
                 fs=fs,
                 training_time=training_time,
                 hv_length=hv_length,
+                with_front_end=with_front_end,
                 )
         run_hdc_inference(
             hv_per_class_dict=hv_per_class_dict,
-            hv_all_classes=hv_all_classes,
-            hamming_threshold=450,
             testcase_folder=testcase_folder,
             testcase=testcase,
             fs=fs,
             inference_start_time=training_time,
             inference_end_time=training_time + 10,
             inference_window_length=training_window_length,
+            with_front_end=with_front_end,
         )
         breakpoint()
