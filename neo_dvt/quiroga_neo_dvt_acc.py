@@ -6,6 +6,15 @@ import spikeinterface.extractors as se
 import argparse
 # local functions
 from yz_src import readin,detection, comparing_result,filtering
+import os
+import pandas as pd
+# get current directory
+workingdir = os.getcwd()
+print("current path:", workingdir)
+
+# make sure response folder exist
+neodvt_dir = os.path.join(workingdir, "neodvt_result")
+os.makedirs(neodvt_dir, exist_ok=True)
 
 
 parser = argparse.ArgumentParser(description="Run accuracy calculation.")
@@ -17,9 +26,7 @@ args = parser.parse_args()
 detecting_type = "D" # "D"-detection or "E"-extraction
 comparing_method = 0 # 0=>Spikeinterface; 1=> accuracy score (only valid for non-detection)
 
-#thr_factor = np.arange(1, 1 + 0.5 * 8, 2)
-thr_factor = np.arange(1, 1 + 0.05 * 80, 0.05)
-thr_factor_list = [round(point, 2) for point in thr_factor]
+thr_factor_list = [2.45]
 print(thr_factor_list)
 
 plot_on = 0
@@ -32,7 +39,7 @@ quiroga_dir = "/imec/other/macaw/projectdata/quiroga_datasets/"
 emphasizer_type = args.emphasizer_type
 
 
-detection_type = 'traditional' #DVT or traditional
+detection_type = 'DVT' #DVT or traditional
 
 if detection_type == 'DVT':
     spike_duration = 0.5 #ms
@@ -81,8 +88,8 @@ detection_params = {
 data_list = ['Quiroga','MEArec','NP']
 data_type = data_list[0]
 length_of_recording = 60 #s    
-acc = [0] * len(thr_factor_list)
 
+set_name_list = ["set"]* len(quiroga_data_list)
 
 
 for x, thr_factor in enumerate(thr_factor_list):
@@ -92,7 +99,9 @@ for x, thr_factor in enumerate(thr_factor_list):
     fp = [0]*len(quiroga_data_list)
     fn = [0]*len(quiroga_data_list)
     for index, recording_path in enumerate(quiroga_data_list):
+        
         set_name = quiroga_data_list[index].split(quiroga_dir)[-1][:-4]
+        set_name_list[index] = set_name 
         gt_path = recording_path
         [fs, coords, recording_traces, GT_instants, GT_labels,GT_coords,centering_positions,_] = readin.readin(recording_path,gt_path, length_of_recording,data_type,set_name=index)
         GT = se.NumpySorting.from_times_labels(np.array(GT_instants), np.array(GT_labels), fs)
@@ -108,6 +117,9 @@ for x, thr_factor in enumerate(thr_factor_list):
             detected[index] = tmp_accuracy_pd['num_tested'][0]
             fp[index] = tmp_accuracy_pd['fp'][0]
             fn[index] = tmp_accuracy_pd['fn'][0]
+            print(f'for dataset{set_name},acc =  {tmp_accuracy* 100: .2f}%, detected = {detected[index]}, fp = {fp[index]} , fn(miss) = {fn[index]} ')
+            spike_instants_file_path = os.path.join(neodvt_dir, f"spike_instants{set_name}.csv")
+            np.savetxt(spike_instants_file_path, spike_instants, fmt="%d", delimiter=",")
         else:
             spike_instants = np.array(GT_instants)
             spike_coords = np.array(GT_coords)
@@ -119,6 +131,23 @@ for x, thr_factor in enumerate(thr_factor_list):
         avg_fp = np.average(fp)
         avg_fn = np.average(fn)
         print(f"with thr_factor {thr_factor},: acc =  {avg_acc* 100: .2f}%, detected = {avg_detected}, fp = {avg_fp} , fn(miss) = {avg_fn} ")
-        acc[x] = avg_acc
-print(acc)
+
+
+accuracy_with_given_thr_factor = np.array(accuracy_with_given_thr_factor, dtype=float)
+fp = np.array(fp, dtype=int)
+fn = np.array(fn, dtype=int)
+detected = np.array(detected, dtype=int)
+
+# get DataFrame
+df = pd.DataFrame({
+    "set_name": set_name_list,
+    "acc": accuracy_with_given_thr_factor,
+    "fp": fp,
+    "fn": fn,
+    "detected": detected
+})
+
+print(df)
+quiroga_acc_path = os.path.join(neodvt_dir, f"neodvt_acc.csv")
+df.to_csv(quiroga_acc_path, index=False)
 

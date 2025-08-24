@@ -4,6 +4,23 @@ import scipy.io as sio
 import matplotlib.pyplot as plt
 import tqdm
 import copy
+import os
+from scipy import signal
+
+def filtering(recording_traces, filter_params,fs):
+    filter_en = filter_params['filter_en']
+    low_cutoff = filter_params['corner_freq'][0]
+    high_cutoff = filter_params['corner_freq'][1]
+    order = filter_params['order']  
+    axis = filter_params['axis']
+    if (filter_en == 1):
+        low_cutoff_normalized = low_cutoff / (0.5 * fs)  
+        high_cutoff_normalized = high_cutoff / (0.5 * fs)
+        b, a = signal.butter(order, [low_cutoff_normalized, high_cutoff_normalized], btype='band', analog=False, output='ba')
+        recording_traces = signal.lfilter(b, a, recording_traces,axis = axis)
+    else:
+        recording_traces = recording_traces
+    return recording_traces
 
 def u_gen_rand_hv(dimension, p=0.5) -> list[int]:
     """! function copied from stef: function to generate a random binary hypervector
@@ -145,7 +162,8 @@ def run_hdc(regenerate_hypervector: bool = True,
             training_window_length: int = 256,
             fs: int = 24000,
             training_time: float = 0.5,
-            with_front_end: bool = False) -> any:
+            with_front_end: bool = False,
+            filter_params: dict = {'filter_en' : True,'corner_freq':[1000,6000],'order' : 1,'axis' : 0}) -> any:
     """! Run the HDC process
     @param regenerate_hypervector: Whether to regenerate hypervectors
     @param testcase_folder: Folder containing the test cases
@@ -179,6 +197,8 @@ def run_hdc(regenerate_hypervector: bool = True,
     # load the sample
     matlab_source_data = sio.loadmat(f"{testcase_folder}{testcase}")
     recording_traces = matlab_source_data["data"][0]
+    recording_traces = filtering(recording_traces, filter_params,fs) #add filtering
+
     spike_times = matlab_source_data["spike_times"][0][0][0]
     spike_times += 24  # 24 is for label correction
     spike_class = matlab_source_data["spike_class"][0][0][0]
@@ -329,6 +349,8 @@ def run_hdc_inference(
         inference_end_time: float = 2.0,
         inference_window_length: int = 30,
         with_front_end: bool = False,
+        front_end_mode: str = 'NEO_DVT',
+        filter_params: dict = {'filter_en' : True,'corner_freq':[1000,6000],'order' : 1,'axis' : 0}
         ):
     """! Run HDC inference on the given hypervectors.
     @param hv_per_class_dict: Hypervectors for each class (include "zero" class)
@@ -339,6 +361,7 @@ def run_hdc_inference(
     @param inference_end_time: Inference end time
     @param inference_window_length: Inference window length
     @param with_front_end: If with front end precisely monitoring spikes
+    @param front_end_mode: Choose the front_end mode to detect the spikes
     """
     # load hv from files
     IM = load_hypervector(f"{testcase_folder}IM_hv.txt")  # for signal level
@@ -347,9 +370,17 @@ def run_hdc_inference(
     # load the inference sample
     matlab_source_data = sio.loadmat(f"{testcase_folder}{testcase}")
     recording_traces = matlab_source_data["data"][0]
-    spike_times = matlab_source_data["spike_times"][0][0][0]
-    spike_times += 24  # 24 is for label correction
+    recording_traces = filtering(recording_traces, filter_params,fs) 
     spike_class = matlab_source_data["spike_class"][0][0][0]
+
+    if front_end_mode == 'ground_truth':
+        spike_times = matlab_source_data["spike_times"][0][0][0]
+        spike_times += 24  # 24 is for label correction
+    elif front_end_mode =='NEO_DVT':
+        testcase_name = os.path.splitext(testcase)[0]
+        NEO_DVT_file = f'neo_dvt/neodvt_result/spike_instants{testcase_name}.csv'
+        spike_times = np.loadtxt(NEO_DVT_file, delimiter=",", dtype=int)    
+    
 
     # inference
     logging.info("Inference...")
@@ -444,15 +475,23 @@ if __name__ == "__main__":
     # parameters
     regenerate_hypervector = False
     with_front_end = True
+    front_end_mode = 'NEO_DVT' #choose from NEO_DVT or ground_truth
+    filter_params = {
+        'filter_en' : True,
+        'corner_freq': [1000,6000],
+        'order' : 1,
+        'axis' : 0
+    }
+
     hv_length = 1024
     fs = 24000 # sampling frequency (Hz)
     training_time = 0.5 # seconds
     training_window_length = 30 # number of samples
     testcase_folder = "./quiroga/"
     testcase_list = [
-        # "C_Easy1_noise005.mat",
-        # "C_Easy2_noise005.mat",
-        "C_Difficult2_noise015.mat",
+        "C_Easy1_noise005.mat",
+        #"C_Easy2_noise005.mat",
+        #"C_Difficult2_noise015.mat",
                     ]
 
     for testcase in testcase_list:
@@ -465,6 +504,7 @@ if __name__ == "__main__":
                 training_time=training_time,
                 hv_length=hv_length,
                 with_front_end=with_front_end,
+                filter_params=filter_params
                 )
         run_hdc_inference(
             hv_per_class_dict=hv_per_class_dict,
@@ -475,5 +515,7 @@ if __name__ == "__main__":
             inference_end_time=training_time + 10,
             inference_window_length=training_window_length,
             with_front_end=with_front_end,
+            front_end_mode=front_end_mode, 
+            filter_params=filter_params
         )
         breakpoint()

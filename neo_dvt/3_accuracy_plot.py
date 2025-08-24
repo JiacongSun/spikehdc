@@ -21,8 +21,14 @@ fig, axes = plt.subplots(1, 2, figsize=(8, 3.2))  # 一行两列的子图，整�
 
 
 for i, acc in enumerate(transposed_accuracies):
-    axes[0].plot( np.arange(1, 1 + 0.05 * len(acc), 0.05),acc,linestyle=linestyle_list[i],color=color_list[i], label=f"{header_ref[i]}")
 
+    axes[0].plot( np.arange(1, 1 + 0.05 * len(acc), 0.05),acc,linestyle=linestyle_list[i],color=color_list[i], label=f"{header_ref[i]}")
+    if (i == 7) :
+        print(header_ref[i])
+        max_index = np.argmax(acc)
+        max_k = np.arange(1, 1 + 0.05 * len(acc), 0.05) [max_index]
+        print(max_k)
+        breakpoint()
 
 # Add labels, title, and legend
 #axes[0].set_title("Accuracy in Different Methods")

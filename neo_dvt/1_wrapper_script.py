@@ -41,7 +41,9 @@ for emphasizer_type in emphasizer_types:
     except Exception as e:
         print(f"Error parsing output: {e}")
 
+
 np.savetxt("all_accuracies_traditional.csv", all_accuracies, delimiter=",", header=",".join(emphasizer_types), comments="")
+#np.savetxt("all_accuracies_DVT.csv", all_accuracies, delimiter=",", header=",".join(emphasizer_types), comments="")
 breakpoint()
 
 
