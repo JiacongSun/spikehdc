@@ -34,7 +34,7 @@ filter_en = 0
 delta_time = 0.4
 
 print_seperate_acc = False
-quiroga_dir = "/imec/other/macaw/projectdata/quiroga_datasets/"
+quiroga_dir = "../quiroga/"
 # Set the emphasizer_type dynamically
 emphasizer_type = args.emphasizer_type
 

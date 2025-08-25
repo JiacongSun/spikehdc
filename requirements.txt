@@ -2,3 +2,7 @@ numpy==2.3.2
 scipy==1.16.1
 matplotlib==3.10.5
 tqdm==4.67.1
+spikeinterface==0.103.0
+MEArec==1.9.2
+scikit-learn==1.7.1
+pandas==2.3.2
