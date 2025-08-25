@@ -25,6 +25,7 @@ def tot_acc_calculation(GT_instants, GT_labels, spike_instants,sorting_labels,fs
             cmp_all = sc.compare_sorter_to_ground_truth(GT_object, sorting_object, delta_time = 0.4, gt_name = "gt", tested_name = "sorted", match_mode = 'best',match_score = 0.0,exhaustive_gt= True)
             cmp_train = None
             cmp_test = None
+            tmp_accuracy, _ = accuracy_count(cmp_all)
             accuracy_print('all', cmp_all, comparing_method,print_pd)
         else:
             if train_set <1: #percentage
@@ -81,7 +82,7 @@ def tot_acc_calculation(GT_instants, GT_labels, spike_instants,sorting_labels,fs
             #accuracy test
             tmp_accuracy2 = accuracy_score(GT_labels_reordered[train_set:], sorting_labels[train_set:])
             print(f" test: {tmp_accuracy2 * 100: .2f} %", end = '    ' )
-    return cmp_all,cmp_train,cmp_test
+    return cmp_all,cmp_train,cmp_test,tmp_accuracy
 
 def accuracy_print (name, cmp_object, comparing_method,print_pd):
     cmp_method = ("raw_count", "by_unit", "pooled_with_average")
@@ -202,3 +203,10 @@ def print_detection_splitness(result_dict,print_en = 0):
         max_percentage_element_list.append([max_coord,max_percentage])
         #print(values)
     return max_percentage_element_list
+
+def accuracy_count (cmp_object):
+    cmp_method = ("raw_count", "by_unit", "pooled_with_average")
+    tmp_accuracy = cmp_object.get_performance(method = cmp_method[2])["accuracy"]
+    tmp_accuracy_pd = cmp_object.get_performance(method = cmp_method[0])    
+    return tmp_accuracy,tmp_accuracy_pd
+
