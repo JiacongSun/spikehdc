@@ -7,16 +7,26 @@ import copy
 import os
 from scipy import signal
 
-def filtering(recording_traces, filter_params,fs):
-    filter_en = filter_params['filter_en']
-    low_cutoff = filter_params['corner_freq'][0]
-    high_cutoff = filter_params['corner_freq'][1]
-    order = filter_params['order']  
-    axis = filter_params['axis']
+def filtering(recording_traces: np.ndarray,
+              filter_params: dict,
+              fs: float) -> np.ndarray:
+    """! Apply a bandpass filter to an input sequence
+    @param recording_traces: input sequence
+    @param filter_params: dictionary containing filter parameters
+    @param fs: sampling frequency
+    @return: filtered recording traces
+    """
+    filter_en = filter_params["filter_en"]
+
     if (filter_en == 1):
+        low_cutoff = filter_params["corner_freq"][0]
+        high_cutoff = filter_params["corner_freq"][1]
+        order = filter_params["order"]  
+        axis = filter_params["axis"]
         low_cutoff_normalized = low_cutoff / (0.5 * fs)  
         high_cutoff_normalized = high_cutoff / (0.5 * fs)
-        b, a = signal.butter(order, [low_cutoff_normalized, high_cutoff_normalized], btype='band', analog=False, output='ba')
+        b, a = signal.butter(order, [low_cutoff_normalized, high_cutoff_normalized],
+                             btype="band", analog=False, output="ba")
         recording_traces = signal.lfilter(b, a, recording_traces,axis = axis)
     else:
         recording_traces = recording_traces
@@ -161,9 +171,11 @@ def run_hdc(regenerate_hypervector: bool = True,
             em_hv_count: int = 100,
             training_window_length: int = 256,
             fs: int = 24000,
-            training_time: float = 0.5,
+            training_start_time: float = 0.0,
+            training_end_time: float = 0.5,
             with_front_end: bool = False,
-            filter_params: dict = {'filter_en' : True,'corner_freq':[1000,6000],'order' : 1,'axis' : 0}) -> any:
+            front_end_mode: str = "NEO_DVT",
+            filter_params: dict = {"filter_en" : True,"corner_freq":[1000,6000],"order" : 1,"axis" : 0}) -> any:
     """! Run the HDC process
     @param regenerate_hypervector: Whether to regenerate hypervectors
     @param testcase_folder: Folder containing the test cases
@@ -173,9 +185,15 @@ def run_hdc(regenerate_hypervector: bool = True,
     @param em_hv_count: Number of hypervectors for input channel IDs
     @param training_window_length: Length of the training window
     @param fs: Sampling frequency (Hz)
-    @param training_time: Training time (seconds)
+    @param training_start_time: Training start time (seconds)
+    @param training_end_time: Training end time (seconds)
     @param with_front_end: If with front end precisely monitoring spikes
+    @param front_end_mode: Front end mode (NEO_DVT or ground_truth)
+    @param filter_params: Dictionary containing filter parameters
     """
+
+    assert front_end_mode in ["NEO_DVT", "ground_truth"]
+
     logging.info("Running HDC...")
     # Generate hypervectors if needed
     if regenerate_hypervector:
@@ -197,10 +215,16 @@ def run_hdc(regenerate_hypervector: bool = True,
     # load the sample
     matlab_source_data = sio.loadmat(f"{testcase_folder}{testcase}")
     recording_traces = matlab_source_data["data"][0]
-    recording_traces = filtering(recording_traces, filter_params,fs) #add filtering
+    recording_traces = filtering(recording_traces, filter_params, fs)  # add filtering
 
-    spike_times = matlab_source_data["spike_times"][0][0][0]
-    spike_times += 24  # 24 is for label correction
+    if front_end_mode == "ground_truth":
+        spike_times = matlab_source_data["spike_times"][0][0][0]
+        spike_times += 24  # 24 is for label correction
+    else:
+        testcase_name = os.path.splitext(testcase)[0]
+        NEO_DVT_file = f"neo_dvt/neodvt_result/spike_instants{testcase_name}.csv"
+        spike_times = np.loadtxt(NEO_DVT_file, delimiter=",", dtype=int)
+
     spike_class = matlab_source_data["spike_class"][0][0][0]
 
     # assertion: curent IM supports range [-2, -2] with a step of 0.01
@@ -216,10 +240,11 @@ def run_hdc(regenerate_hypervector: bool = True,
     training_spike_class: list = []  # record of spike class for different windows
 
     # generate spike labels for windows
-    training_sequence = recording_traces[0: int(fs * training_time)]
+    training_sequence = recording_traces[int(fs * training_start_time): int(fs * training_end_time)]
     num_of_training_windows = len(training_sequence) // training_window_length
-    spike_times = spike_times[spike_times <= int(fs * training_time)]
-    window_having_spike = [int(t // training_window_length) for t in spike_times]
+    spike_times_to_end = spike_times[spike_times <= int(fs * training_end_time)]
+    spike_times = spike_times_to_end[spike_times_to_end >= int(fs * training_start_time)]
+    window_having_spike = [int((t - fs * training_start_time) // training_window_length) for t in spike_times]
     training_spike_labels = [1 if i in window_having_spike else 0 for i in range(num_of_training_windows)]
 
     # check the minimal diff of spike time
@@ -230,9 +255,10 @@ def run_hdc(regenerate_hypervector: bool = True,
                         f"{training_window_length}, may cause issues in training.")
 
     # generate spike class for windows
-    spike_class = spike_class[0: len(spike_times)]
+    spike_class = spike_class[0: len(spike_times_to_end)]
+    spike_class = spike_class[-len(spike_times):]
     if not with_front_end:
-        spike_class = np.append(spike_class, 0)  # append 0 for non-spiking window
+        spike_class = np.append(spike_class, 0)  # append class #0 for non-spiking window
     class_set = sorted(set(spike_class))
     training_spike_class = [int(spike_class[window_having_spike.index(i)] if i in window_having_spike else 0)
                             for i in range(num_of_training_windows)]
@@ -349,8 +375,8 @@ def run_hdc_inference(
         inference_end_time: float = 2.0,
         inference_window_length: int = 30,
         with_front_end: bool = False,
-        front_end_mode: str = 'NEO_DVT',
-        filter_params: dict = {'filter_en' : True,'corner_freq':[1000,6000],'order' : 1,'axis' : 0}
+        front_end_mode: str = "NEO_DVT",
+        filter_params: dict = {"filter_en" : True,"corner_freq":[1000,6000],"order" : 1,"axis" : 0}
         ):
     """! Run HDC inference on the given hypervectors.
     @param hv_per_class_dict: Hypervectors for each class (include "zero" class)
@@ -362,7 +388,11 @@ def run_hdc_inference(
     @param inference_window_length: Inference window length
     @param with_front_end: If with front end precisely monitoring spikes
     @param front_end_mode: Choose the front_end mode to detect the spikes
+    @param filter_params: Parameters for filtering the signals
     """
+
+    assert front_end_mode in ["NEO_DVT", "ground_truth"], "Invalid front_end_mode."
+
     # load hv from files
     IM = load_hypervector(f"{testcase_folder}IM_hv.txt")  # for signal level
     EM = load_hypervector(f"{testcase_folder}EM_hv.txt")  # for signal timing
@@ -373,14 +403,13 @@ def run_hdc_inference(
     recording_traces = filtering(recording_traces, filter_params,fs) 
     spike_class = matlab_source_data["spike_class"][0][0][0]
 
-    if front_end_mode == 'ground_truth':
+    if front_end_mode == "ground_truth":
         spike_times = matlab_source_data["spike_times"][0][0][0]
         spike_times += 24  # 24 is for label correction
-    elif front_end_mode =='NEO_DVT':
+    else:
         testcase_name = os.path.splitext(testcase)[0]
-        NEO_DVT_file = f'neo_dvt/neodvt_result/spike_instants{testcase_name}.csv'
+        NEO_DVT_file = f"neo_dvt/neodvt_result/spike_instants{testcase_name}.csv"
         spike_times = np.loadtxt(NEO_DVT_file, delimiter=",", dtype=int)    
-    
 
     # inference
     logging.info("Inference...")
@@ -468,6 +497,7 @@ def run_hdc_inference(
 
     logging.info(f"Correct spike identifications: {num_correct_spike_inferred} ({correct_identify_ratio:.2%})")
     logging.info(f"Correct class identifications: {num_correct_class_inferred} ({class_identify_ratio:.2%})")
+    breakpoint()
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(lineno)d - %(message)s")
@@ -475,17 +505,18 @@ if __name__ == "__main__":
     # parameters
     regenerate_hypervector = False
     with_front_end = True
-    front_end_mode = 'NEO_DVT' #choose from NEO_DVT or ground_truth
+    front_end_mode = "ground_truth" #choose from NEO_DVT or ground_truth
     filter_params = {
-        'filter_en' : True,
-        'corner_freq': [1000,6000],
-        'order' : 1,
-        'axis' : 0
+        "filter_en" : True,
+        "corner_freq": [1000,6000],
+        "order" : 1,
+        "axis" : 0
     }
 
     hv_length = 1024
     fs = 24000 # sampling frequency (Hz)
-    training_time = 0.5 # seconds
+    training_start_time = 0.5 # seconds
+    training_end_time = 1 # seconds
     training_window_length = 30 # number of samples
     testcase_folder = "./quiroga/"
     testcase_list = [
@@ -501,9 +532,11 @@ if __name__ == "__main__":
                 testcase=testcase,
                 training_window_length=training_window_length,
                 fs=fs,
-                training_time=training_time,
+                training_start_time=training_start_time,
+                training_end_time=training_end_time,
                 hv_length=hv_length,
                 with_front_end=with_front_end,
+                front_end_mode=front_end_mode,
                 filter_params=filter_params
                 )
         run_hdc_inference(
@@ -511,8 +544,8 @@ if __name__ == "__main__":
             testcase_folder=testcase_folder,
             testcase=testcase,
             fs=fs,
-            inference_start_time=training_time,
-            inference_end_time=training_time + 10,
+            inference_start_time=training_start_time,
+            inference_end_time=training_end_time,
             inference_window_length=training_window_length,
             with_front_end=with_front_end,
             front_end_mode=front_end_mode, 
