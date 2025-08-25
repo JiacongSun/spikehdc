@@ -6,3 +6,4 @@ spikeinterface==0.103.0
 MEArec==1.9.2
 scikit-learn==1.7.1
 pandas==2.3.2
+numba==0.61.2

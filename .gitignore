@@ -5,3 +5,6 @@ __pycache__/
 
 */IM_hv.txt
 */EM_hv.txt
+
+# detection output csv
+*.csv
