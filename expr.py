@@ -222,15 +222,21 @@ def run_hdc(regenerate_hypervector: bool = True,
         spike_times = matlab_source_data["spike_times"][0][0][0].copy()
         spike_times += 24  # 24 is for label correction
     else:
+        script_path = os.path.abspath(__file__)
+        script_dir = os.path.dirname(script_path)
         testcase_name = os.path.splitext(testcase)[0]
-        NEO_DVT_file = f"neo_dvt/neodvt_result/spike_instants{testcase_name}.csv"
+        NEO_DVT_file = os.path.join(script_dir,f"neo_dvt/neodvt_result/spike_instants{testcase_name}.csv")
         spike_times = np.loadtxt(NEO_DVT_file, delimiter=",", dtype=int)
 
-    jitter_time = 0.4e-3
+    jitter_time = 0#0.4e-3
     N_jitter = int(round(jitter_time * fs))
-    jitter = np.random.uniform(-N_jitter, N_jitter + 1, size=spike_times.shape) #uniform jitter
-    spike_times += jitter
+    jitter = np.random.randint(-N_jitter, N_jitter + 1, size=spike_times.shape) #uniform jitter
     spike_class = matlab_source_data["spike_class"][0][0][0]
+
+    spike_times_jittered  = jitter +spike_times
+    order = np.argsort(spike_times_jittered)
+    spike_times = spike_times_jittered[order]
+    spike_class = spike_class[order]
 
     # assertion: curent IM supports range [-2, -2] with a step of 0.01
     recording_min = np.min(recording_traces)
@@ -424,7 +430,16 @@ def run_hdc_inference(
         script_dir = os.path.dirname(script_path)
         testcase_name = os.path.splitext(testcase)[0]
         NEO_DVT_file = os.path.join(script_dir,f"neo_dvt/neodvt_result/spike_instants{testcase_name}.csv")
+        print(NEO_DVT_file)
         spike_times = np.loadtxt(NEO_DVT_file, delimiter=",", dtype=int)    
+
+    jitter_time = 0.2e-3
+    N_jitter = int(round(jitter_time * fs))
+    jitter = np.random.randint(-N_jitter, N_jitter + 1, size=spike_times.shape) #uniform jitter
+    spike_times_jittered  = jitter +spike_times
+    order = np.argsort(spike_times_jittered)
+    spike_times = spike_times_jittered[order]
+    spike_class = spike_class[order]
 
     # inference
     logging.info("Inference...")
@@ -512,12 +527,13 @@ def run_hdc_inference(
 
     logging.info(f"Correct spike identifications: {num_correct_spike_inferred} ({correct_identify_ratio:.2%})")
     logging.info(f"Correct class identifications: {num_correct_class_inferred} ({class_identify_ratio:.2%})")
-    breakpoint()
 
     if comparing == 'spikeinterface':
+        breakpoint()
         cmp_all,_,_,tmp_accuracy = comparing_result.tot_acc_calculation(gt_spike_times, gt_spike_class, spike_times,np.array(inference_spike_class_inferred),fs,train_set= None,comparing_method = 0, print_pd = 0)
-        cmp_all.get_performance(method = 'raw_count')
+        cmp_all.print_performance(method = 'raw_count')
         print("spike interface accuracy {:.2f}%".format(tmp_accuracy*100))
+    #breakpoint()
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(lineno)d - %(message)s")
@@ -527,7 +543,7 @@ if __name__ == "__main__":
     # parameters
     regenerate_hypervector = False
     with_front_end = True
-    front_end_mode = "ground_truth" #choose from NEO_DVT or ground_truth
+    front_end_mode = "NEO_DVT" #choose from NEO_DVT or ground_truth
     filter_params = {
         "filter_en" : True,
         "corner_freq": [1000,6000],
@@ -538,8 +554,12 @@ if __name__ == "__main__":
 
     hv_length = 1024
     fs = 24000 # sampling frequency (Hz)
-    training_start_time = 0.5 # seconds
-    training_end_time = 1 # seconds
+    training_start_time = 0 # seconds
+    training_end_time = 2 # seconds
+
+    inference_start_time = 2 # seconds
+    inference_end_time = 22 # seconds
+
     training_window_length = 30 # number of samples
     testcase_folder = os.path.join(script_dir, "quiroga/") # always use the 'quiroga' folder under script_dir (not CWD)
     testcase_list = [
@@ -559,7 +579,7 @@ if __name__ == "__main__":
                 training_end_time=training_end_time,
                 hv_length=hv_length,
                 with_front_end=with_front_end,
-                front_end_mode=front_end_mode,
+                front_end_mode="ground_truth",
                 filter_params=filter_params
                 )
         run_hdc_inference(
@@ -567,12 +587,12 @@ if __name__ == "__main__":
             testcase_folder=testcase_folder,
             testcase=testcase,
             fs=fs,
-            inference_start_time=training_start_time,
-            inference_end_time=training_end_time,
+            inference_start_time=inference_start_time,
+            inference_end_time=inference_end_time,
             inference_window_length=training_window_length,
             with_front_end=with_front_end,
-            front_end_mode=front_end_mode, 
+            front_end_mode="ground_truth", 
             filter_params=filter_params,
             comparing=comparing
         )
-        breakpoint()
+        #breakpoint()
