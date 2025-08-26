@@ -1,6 +1,10 @@
 # Python byte-compiled / optimized / DLL files
 __pycache__/
+*__pycache__*
 *.py[cod]
 
 */IM_hv.txt
 */EM_hv.txt
+
+# detection output csv
+*.csv

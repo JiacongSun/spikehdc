@@ -13,7 +13,7 @@ import pdb
 from scipy.io import loadmat
 def readin (recording_path,gt_path, length_of_recording,data_type,set_name = None):
     if data_type == "Quiroga":
-        quiroga_dir = "/imec/other/macaw/projectdata/quiroga_datasets/"
+        quiroga_dir = "../quiroga/"
         quiroga_data_list = [
                      f"{quiroga_dir}C_Easy1_noise005.mat", \
                      f"{quiroga_dir}C_Easy1_noise01.mat", \
