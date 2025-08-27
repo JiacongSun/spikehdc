@@ -7,6 +7,8 @@ import copy
 import os
 from scipy import signal
 from neo_dvt.yz_src import comparing_result
+import datetime
+import pandas as pd
 
 def filtering(recording_traces: np.ndarray,
               filter_params: dict,
@@ -156,6 +158,7 @@ def calc_hdc_of_windows(
             signal_hv: list = []
             signal_level = window[j]
             signal_to_im = IM[int((signal_level + 2) * 100)] # the map is [-2, 2] -> [0, 401]
+            # signal_hv.append(signal_to_im)
             signal_hv.append( np.roll(signal_to_im, j).tolist() ) # use circular shift to represent timing
             # signal_hv.append(np.logical_xor(signal_to_im, EM[j])) # use EM to represent timing
             # compress signal_hv
@@ -169,14 +172,15 @@ def run_hdc(regenerate_hypervector: bool = True,
             testcase: str = "C_Easy1_noise005.mat",
             hv_length: int = 1024,
             im_hv_count: int = 401,
-            em_hv_count: int = 100,
+            em_hv_count: int = 30,
             training_window_length: int = 256,
             fs: int = 24000,
             training_start_time: float = 0.0,
             training_end_time: float = 0.5,
             with_front_end: bool = False,
             front_end_mode: str = "NEO_DVT",
-            filter_params: dict = {"filter_en" : True,"corner_freq":[1000,6000],"order" : 1,"axis" : 0}) -> any:
+            filter_params: dict = {"filter_en" : True,"corner_freq":[1000,6000],"order" : 1,"axis" : 0},
+            jitter_time: float = 0) -> any:
     """! Run the HDC process
     @param regenerate_hypervector: Whether to regenerate hypervectors
     @param testcase_folder: Folder containing the test cases
@@ -191,16 +195,17 @@ def run_hdc(regenerate_hypervector: bool = True,
     @param with_front_end: If with front end precisely monitoring spikes
     @param front_end_mode: Front end mode (NEO_DVT or ground_truth)
     @param filter_params: Dictionary containing filter parameters
+    @param jitter_time: jitter time added in the spike_times
     """
 
-    assert front_end_mode in ["NEO_DVT", "ground_truth"]
+    assert front_end_mode in ["NEO_DVT", "ground_truth", "combined"]
 
     logging.info("Running HDC...")
     # Generate hypervectors if needed
     if regenerate_hypervector:
         # IM = generate_hypervector(hv_length=hv_length, hv_count=im_hv_count)
         IM = generate_item_hypervector(hv_length=hv_length, hv_count=im_hv_count, end_distance=1)
-        EM = generate_hypervector(hv_length=hv_length, hv_count=em_hv_count)
+        # EM = generate_item_hypervector(hv_length=hv_length, hv_count=em_hv_count, end_distance=1)
         # write to files
         with open(f"{testcase_folder}IM_hv.txt", "w") as f:
             for key, value in IM.items():
@@ -221,12 +226,15 @@ def run_hdc(regenerate_hypervector: bool = True,
     if front_end_mode == "ground_truth":
         spike_times = matlab_source_data["spike_times"][0][0][0].copy()
         spike_times += 24  # 24 is for label correction
-    else:
+    elif front_end_mode == "NEO_DVT":
         script_path = os.path.abspath(__file__)
         script_dir = os.path.dirname(script_path)
         testcase_name = os.path.splitext(testcase)[0]
         NEO_DVT_file = os.path.join(script_dir,f"neo_dvt/neodvt_result/spike_instants{testcase_name}.csv")
         spike_times = np.loadtxt(NEO_DVT_file, delimiter=",", dtype=int)
+    else:
+        spike_times = matlab_source_data["spike_times"][0][0][0].copy()
+        spike_times += 24  # 24 is for label correction
 
     jitter_time = 0#0.4e-3
     N_jitter = int(round(jitter_time * fs))
@@ -273,6 +281,29 @@ def run_hdc(regenerate_hypervector: bool = True,
     class_set = sorted(set(spike_class))
     training_spike_class = [int(spike_class[window_having_spike.index(i)] if i in window_having_spike else 0)
                             for i in range(num_of_training_windows)]
+
+    ######################################################
+    if front_end_mode == "combined":
+        ## replace with neo-dvt spike times
+        script_path = os.path.abspath(__file__)
+        script_dir = os.path.dirname(script_path)
+        testcase_name = os.path.splitext(testcase)[0]
+        NEO_DVT_file = os.path.join(script_dir,f"neo_dvt/neodvt_result/spike_instants{testcase_name}.csv")
+        spike_times_neo = np.loadtxt(NEO_DVT_file, delimiter=",", dtype=int)
+        spike_times_new = []
+        spike_class_new = []
+        for i in range(len(spike_times_neo)):
+            spike_time_neo = spike_times_neo[i]
+            for j in range(len(spike_times)):
+                spike_time_gt = spike_times[j]
+                diff_abs = abs(spike_time_neo - spike_time_gt)
+                if diff_abs < 9:
+                    spike_times_new.append(spike_time_neo)
+                    spike_class_new.append(spike_class[j])
+                    break
+        spike_times = spike_times_new
+        spike_class = spike_class_new
+    ######################################################
 
     ######################################################
     ## To be replaced with real frontend processing alg.
@@ -388,7 +419,8 @@ def run_hdc_inference(
         with_front_end: bool = False,
         front_end_mode: str = "NEO_DVT",
         filter_params: dict = {"filter_en" : True,"corner_freq":[1000,6000],"order" : 1,"axis" : 0},
-        comparing: str = 'spikeinterface'
+        comparing: str = "spikeinterface",
+        jitter_time:float = 0
         ):
     """! Run HDC inference on the given hypervectors.
     @param hv_per_class_dict: Hypervectors for each class (include "zero" class)
@@ -401,6 +433,8 @@ def run_hdc_inference(
     @param with_front_end: If with front end precisely monitoring spikes
     @param front_end_mode: Choose the front_end mode to detect the spikes
     @param filter_params: Parameters for filtering the signals
+    @param comparing: Parameters to use spikeinterface for calculating accuracy
+    @param jitter_time: jitter time added in the spike_times
     """
 
     assert front_end_mode in ["NEO_DVT", "ground_truth"], "Invalid front_end_mode."
@@ -433,7 +467,6 @@ def run_hdc_inference(
         print(NEO_DVT_file)
         spike_times = np.loadtxt(NEO_DVT_file, delimiter=",", dtype=int)    
 
-    jitter_time = 0.2e-3
     N_jitter = int(round(jitter_time * fs))
     jitter = np.random.randint(-N_jitter, N_jitter + 1, size=spike_times.shape) #uniform jitter
     spike_times_jittered  = jitter +spike_times
@@ -529,11 +562,16 @@ def run_hdc_inference(
     logging.info(f"Correct class identifications: {num_correct_class_inferred} ({class_identify_ratio:.2%})")
 
     if comparing == 'spikeinterface':
-        breakpoint()
+        #breakpoint()
         cmp_all,_,_,tmp_accuracy = comparing_result.tot_acc_calculation(gt_spike_times, gt_spike_class, spike_times,np.array(inference_spike_class_inferred),fs,train_set= None,comparing_method = 0, print_pd = 0)
-        cmp_all.print_performance(method = 'raw_count')
+        performance = cmp_all.get_performance(method = 'raw_count')
+        print(performance)
         print("spike interface accuracy {:.2f}%".format(tmp_accuracy*100))
-    #breakpoint()
+    else:
+        tmp_accuracy = None
+    # breakpoint()
+    return tmp_accuracy
+
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(lineno)d - %(message)s")
@@ -543,7 +581,6 @@ if __name__ == "__main__":
     # parameters
     regenerate_hypervector = False
     with_front_end = True
-    front_end_mode = "NEO_DVT" #choose from NEO_DVT or ground_truth
     filter_params = {
         "filter_en" : True,
         "corner_freq": [1000,6000],
@@ -558,16 +595,29 @@ if __name__ == "__main__":
     training_end_time = 2 # seconds
 
     inference_start_time = 2 # seconds
-    inference_end_time = 22 # seconds
+    inference_end_time = 10 # seconds
 
     training_window_length = 30 # number of samples
-    testcase_folder = os.path.join(script_dir, "quiroga/") # always use the 'quiroga' folder under script_dir (not CWD)
+    testcase_folder = os.path.join(script_dir, "quiroga/") # always use the 'quiroga' folder under script_dir (not CWD)           ]
     testcase_list = [
-        "C_Easy1_noise005.mat",
-        #"C_Easy2_noise005.mat",
-        #"C_Difficult2_noise015.mat",
-                    ]
-
+                     f"C_Easy1_noise005.mat", \
+                    #  f"C_Easy1_noise01.mat", \
+                    #  f"C_Easy1_noise015.mat", \
+                    #  f"C_Easy1_noise02.mat", \
+                    #  f"C_Easy2_noise005.mat", \
+                    #  f"C_Easy2_noise01.mat", \
+                    #  f"C_Easy2_noise015.mat", \
+                    #  f"C_Easy2_noise02.mat", \
+                    #  f"C_Difficult1_noise005.mat", \
+                    #  f"C_Difficult1_noise01.mat", \
+                    #  f"C_Difficult1_noise015.mat", \
+                    #  f"C_Difficult1_noise02.mat", \
+                    #  f"C_Difficult2_noise005.mat", \
+                    #  f"C_Difficult2_noise01.mat", \
+                    #  f"C_Difficult2_noise015.mat", \
+                    #  f"C_Difficult2_noise02.mat"
+                     ]
+    tmp_accuracy_list = []
     for testcase in testcase_list:
         hv_per_class_dict, hv_all_classes, suggested_threshold = run_hdc(
                 regenerate_hypervector=regenerate_hypervector,
@@ -579,10 +629,12 @@ if __name__ == "__main__":
                 training_end_time=training_end_time,
                 hv_length=hv_length,
                 with_front_end=with_front_end,
-                front_end_mode="ground_truth",
-                filter_params=filter_params
+                front_end_mode="combined", # can be chosen between NEO_DVT and ground_truth and combined
+                filter_params=filter_params,
+                jitter_time = 0 #<0.4e-3
                 )
-        run_hdc_inference(
+        
+        tmp_accuracy = run_hdc_inference(
             hv_per_class_dict=hv_per_class_dict,
             testcase_folder=testcase_folder,
             testcase=testcase,
@@ -591,8 +643,14 @@ if __name__ == "__main__":
             inference_end_time=inference_end_time,
             inference_window_length=training_window_length,
             with_front_end=with_front_end,
-            front_end_mode="ground_truth", 
+            front_end_mode="NEO_DVT", # can be chosen between NEO_DVT and ground_truth
             filter_params=filter_params,
-            comparing=comparing
+            comparing=comparing,
+            jitter_time = 0 #<0.4e-3
         )
-        #breakpoint()
+        tmp_accuracy_list.append(tmp_accuracy)
+    df = pd.DataFrame({
+    "dataset": testcase_list,
+    "accuracy": tmp_accuracy_list})
+    breakpoint()
+    df.to_csv("accuracy_gt.csv", index=False)
